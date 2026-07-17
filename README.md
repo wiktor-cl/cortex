@@ -35,7 +35,7 @@ flowchart LR
     R --> W
     W -->|"ingest chunks + embeddings"| AI
     W -->|"PATCH status (internal API key)"| GW
-    AI -->|SQLAlchemy, schema "rag"| PG
+    AI -->|"SQLAlchemy, schema 'rag'"| PG
 ```
 
 Three backend services, one shared Postgres instance split by schema (`public` for the
