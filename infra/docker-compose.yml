@@ -1,0 +1,114 @@
+name: cortex
+
+x-worker-env: &worker-env
+  REDIS_URL: redis://redis:6379/0
+  QUEUE_NAME: ingestion
+  UPLOADS_DIR: /data/uploads
+  AI_SERVICE_URL: http://ai-service:8001
+  GATEWAY_INTERNAL_URL: http://gateway:8080
+  INTERNAL_API_KEY: ${CORTEX_INTERNAL_API_KEY:-change-me-internal-key}
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: cortex
+      POSTGRES_USER: cortex
+      POSTGRES_PASSWORD: cortex
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cortex -d cortex"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  ai-service:
+    build: ../ai-service
+    environment:
+      DATABASE_URL: postgresql+asyncpg://cortex:cortex@postgres:5432/cortex
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    ports:
+      - "8001:8001"
+
+  worker-watcher:
+    build: ../worker
+    command: ["python", "-m", "worker.watcher_main"]
+    environment:
+      <<: *worker-env
+    volumes:
+      - uploads:/data/uploads
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  worker-rq:
+    build: ../worker
+    command: ["rq", "worker", "ingestion", "--url", "redis://redis:6379/0"]
+    environment:
+      <<: *worker-env
+    volumes:
+      - uploads:/data/uploads
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  gateway:
+    build: ../gateway
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/cortex
+      SPRING_DATASOURCE_USERNAME: cortex
+      SPRING_DATASOURCE_PASSWORD: cortex
+      CORTEX_AI_SERVICE_BASE_URL: http://ai-service:8001
+      CORTEX_UPLOADS_DIR: /data/uploads
+      CORTEX_INTERNAL_API_KEY: ${CORTEX_INTERNAL_API_KEY:-change-me-internal-key}
+      CORTEX_CORS_ALLOWED_ORIGINS: http://localhost:5173
+      CORTEX_JWT_SECRET: ${CORTEX_JWT_SECRET:-dev-only-secret-please-override-in-production-min-32-bytes!!}
+      CORTEX_ADMIN_EMAIL: ${CORTEX_ADMIN_EMAIL:-admin@cortex.local}
+      CORTEX_ADMIN_PASSWORD: ${CORTEX_ADMIN_PASSWORD:-changeme123}
+    volumes:
+      - uploads:/data/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ai-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    ports:
+      - "8080:8080"
+
+  frontend:
+    build: ../frontend
+    depends_on:
+      gateway:
+        condition: service_healthy
+    ports:
+      - "5173:80"
+
+volumes:
+  postgres-data:
+  uploads:
