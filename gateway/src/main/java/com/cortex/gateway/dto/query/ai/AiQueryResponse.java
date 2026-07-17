@@ -1,0 +1,8 @@
+package com.cortex.gateway.dto.query.ai;
+
+import com.fasterxml.jackson.databind.PropertyNamingStrategies;
+import com.fasterxml.jackson.databind.annotation.JsonNaming;
+import java.util.List;
+
+@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+public record AiQueryResponse(String answer, String mode, List<AiCitation> citations, List<AiSubAnswer> subAnswers) {}
